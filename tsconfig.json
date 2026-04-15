@@ -1,0 +1,30 @@
+{
+    "$schema": "https://json.schemastore.org/tsconfig",
+    "compileOnSave": true,
+    "compilerOptions": {
+        "allowImportingTsExtensions": true,
+        "declaration": true,
+        "forceConsistentCasingInFileNames": true,
+        "lib": [
+            "ES2022",
+            "ESNext.Disposable"
+        ],
+        "module": "node20",
+        "newLine": "lf",
+        "noFallthroughCasesInSwitch": true,
+        "noImplicitAny": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noImplicitThis": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": false,
+        "outDir": "lib",
+        "preserveSymlinks": true,
+        "rewriteRelativeImportExtensions":true,
+        "rootDir": "src",
+        "sourceMap": true,
+        "strict": true,
+        "target": "es2022",
+        "types": [ "node" ]
+    }
+}

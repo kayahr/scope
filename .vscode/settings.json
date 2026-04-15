@@ -1,0 +1,24 @@
+{
+    "js/ts.tsdk.path": "node_modules/typescript/lib",
+    "files.exclude": {
+        "lib": true,
+        "node_modules": true
+    },
+    "nodejs-testing.extensions": [
+        {
+            "extensions": [ "ts" ],
+            "filePatterns": [
+                "src/test/**/*.test.ts"
+            ],
+            "parameters": [
+                "--experimental-test-coverage",
+                "--expose-gc"
+            ]
+        }
+    ],
+    "oxc.typeAware": true,
+    "coverage-gutters.coverageFileNames": [
+        "lib/test/lcov.info"
+    ],
+    "oxc.enable": true,
+}

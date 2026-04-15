@@ -1,0 +1,22 @@
+{
+    "$schema": "https://typedoc.org/schema.json",
+    "entryPoints": [
+        "src/main/index.ts"
+    ],
+    "basePath": "src/main",
+    "entryPointStrategy": "resolve",
+    "projectDocuments": [
+        "doc/index.md"
+    ],
+    "out": "lib/apidoc",
+    "excludePrivate": true,
+    "excludeExternals": true,
+    "excludeInternal": true,
+    "treatWarningsAsErrors": true,
+    "validation": true,
+    "plugin": [
+        "@kayahr/typedoc/github-theme",
+        "@kayahr/typedoc/mdn-links"
+    ],
+    "gitRevision": "main"
+}
