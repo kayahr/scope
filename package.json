@@ -3,7 +3,7 @@
     "name": "@kayahr/scope",
     "version": "0.1.0",
     "type": "module",
-    "description": "Reusable disposable ownership scopes and typed scope slots for browser and Node.js",
+    "description": "Ownership scopes, cleanup callbacks, and typed scope-local values for TypeScript",
     "keywords": [
         "scope",
         "ownership",
