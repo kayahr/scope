@@ -1,7 +1,7 @@
 {
     "$schema": "https://json.schemastore.org/package",
     "name": "@kayahr/scope",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "type": "module",
     "description": "Ownership scopes, cleanup callbacks, and typed scope-local values for TypeScript",
     "keywords": [
