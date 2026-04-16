@@ -9,15 +9,12 @@ import type { ScopeSlot } from "./slot.ts";
 /** Currently active scope, or null when no scope is active. */
 let activeScope: Scope | null = null;
 
-/** Whether the shared root scope is currently being initialized. */
-let initializingRootScope = false;
-
 /**
  * Public scope for lifetime, disposal, and scope-local values.
  *
  * A scope owns disposal callbacks registered while {@link run} executes synchronously and stores local values through scope slots.
  */
-export class Scope implements Disposable {
+export abstract class Scope implements Disposable {
     /** Parent scope currently owning this scope, or null when there is none. */
     #parent: Scope | null;
 
@@ -33,25 +30,19 @@ export class Scope implements Disposable {
     /** Whether this scope already ran its disposal sequence. */
     #disposed = false;
 
-    /** Creates a new scope owned by the current active scope or shared root scope. */
-    public constructor();
-
     /**
-     * Creates a new scope owned by an explicit parent scope.
+     * Creates a new scope optionally owned by an explicit parent scope.
      *
-     * @param parent - The explicit parent scope.
+     * @param parent - The explicit parent scope, or null when there is none.
      * @throws {@link ScopeError} - When `parent` was already disposed.
      */
-    public constructor(parent: Scope);
-
-    public constructor(parent?: Scope) {
-        const resolvedParent = initializingRootScope ? null : (parent ?? activeScope ?? rootScope);
-        if (resolvedParent?.isDisposed()) {
+    protected constructor(parent: Scope | null) {
+        if (parent?.isDisposed()) {
             throw new ScopeError("Cannot create a child scope under a disposed parent scope");
         }
-        this.#parent = resolvedParent;
-        if (resolvedParent != null) {
-            resolvedParent.#children.add(this);
+        this.#parent = parent;
+        if (parent != null) {
+            parent.#children.add(this);
         }
     }
 
@@ -80,40 +71,14 @@ export class Scope implements Disposable {
 
     /** Disposes this scope and all resources currently owned by it. */
     public dispose(): void {
-        if (this === rootScope) {
-            throw new ScopeError("Cannot dispose the shared root scope");
-        }
         if (this.#disposed) {
             return;
         }
         this.#disposed = true;
-        const parent = this.#parent;
-        if (parent != null) {
-            parent.#children.delete(this);
-        }
-        const currentChildren = [ ...this.#children ];
-        this.#children.clear();
-        const currentCleanups = [ ...this.#cleanups ];
-        this.#cleanups.clear();
-        const errors: unknown[] = [];
-        for (const child of currentChildren) {
-            try {
-                child.dispose();
-            } catch (error) {
-                errors.push(error);
-            }
-        }
-        for (const cleanup of currentCleanups) {
-            try {
-                cleanup();
-            } catch (error) {
-                errors.push(error);
-            }
-        }
-        this.#slots.clear();
-        this.#parent = null;
-        if (errors.length > 0) {
-            throwErrors(errors, "Scope cleanup failed");
+        try {
+            this.clear();
+        } finally {
+            this.#parent = null;
         }
     }
 
@@ -219,6 +184,39 @@ export class Scope implements Disposable {
     }
 
     /**
+     * Clears the currently owned child scopes, cleanup callbacks, and slot values.
+     */
+    protected clear(): void {
+        const parent = this.#parent;
+        if (parent != null) {
+            parent.#children.delete(this);
+        }
+        const currentChildren = [ ...this.#children ];
+        this.#children.clear();
+        const currentCleanups = [ ...this.#cleanups ];
+        this.#cleanups.clear();
+        const errors: unknown[] = [];
+        for (const child of currentChildren) {
+            try {
+                child.dispose();
+            } catch (error) {
+                errors.push(error);
+            }
+        }
+        for (const cleanup of currentCleanups) {
+            try {
+                cleanup();
+            } catch (error) {
+                errors.push(error);
+            }
+        }
+        this.#slots.clear();
+        if (errors.length > 0) {
+            throwErrors(errors, "Scope cleanup failed");
+        }
+    }
+
+    /**
      * Throws when this scope was already disposed.
      *
      * @param message - The error message.
@@ -230,15 +228,32 @@ export class Scope implements Disposable {
     }
 }
 
-/** Shared root scope for scopes created without an active scope and for explicit long-lived ownership. */
-const rootScope = (() => {
-    initializingRootScope = true;
-    try {
-        return new Scope();
-    } finally {
-        initializingRootScope = false;
+/** Normal scope implementation owned by an explicit parent, active scope, or shared root scope. */
+class ChildScope extends Scope {
+    public constructor(parent: Scope = activeScope ?? rootScope) {
+        super(parent);
     }
-})();
+}
+
+/** Shared root scope implementation. */
+class RootScope extends Scope {
+    public constructor() {
+        super(null);
+    }
+
+    /** The shared root scope itself cannot be disposed. */
+    public override dispose(): void {
+        throw new ScopeError("Cannot dispose the shared root scope");
+    }
+
+    /** Resets the shared root scope without replacing it. */
+    public reset(): void {
+        this.clear();
+    }
+}
+
+/** Shared root scope for scopes created without an active scope and for explicit long-lived ownership. */
+const rootScope = new RootScope();
 
 /**
  * Returns the currently active scope.
@@ -252,12 +267,23 @@ export function getActiveScope(): Scope | null {
 /**
  * Returns the shared root scope.
  *
- * The shared root scope is not active by default. Scopes created without an active scope are attached to it.
+ * The shared root scope is not active by default. Scopes created without an active scope are attached to it. Use
+ * {@link resetRootScope} to clear it while keeping the same shared scope instance.
  *
  * @returns The shared root scope.
  */
 export function getRootScope(): Scope {
     return rootScope;
+}
+
+/**
+ * Resets the shared root scope without replacing it.
+ *
+ * This disposes the root scope's current child scopes, runs its registered cleanup callbacks, and clears its local slot values, but
+ * keeps the shared root scope itself usable afterwards.
+ */
+export function resetRootScope(): void {
+    rootScope.reset();
 }
 
 /**
@@ -315,7 +341,7 @@ export function createScope<T>(parent: Scope, func: (scope: Scope) => T): T;
 export function createScope<T>(parentOrFunc?: Scope | ((scope: Scope) => T), func?: (scope: Scope) => T): Scope | T {
     const parent = typeof parentOrFunc === "function" || parentOrFunc == null ? undefined : parentOrFunc;
     const callback = typeof parentOrFunc === "function" ? parentOrFunc : func;
-    const scope = parent == null ? new Scope() : new Scope(parent);
+    const scope = new ChildScope(parent);
     if (callback == null) {
         return scope;
     }

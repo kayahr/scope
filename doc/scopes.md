@@ -27,7 +27,7 @@ scope.dispose();
 
 `createScope(scope => ...)` is shorthand for creating a scope and immediately running a callback inside it. `createScope(parent, scope => ...)` does the same with an explicit parent.
 
-`getRootScope()` returns the shared root scope. It is not active by default, but scopes created without an active scope are attached to it. The shared root scope cannot be disposed.
+`getRootScope()` returns the shared root scope. It is not active by default, but scopes created without an active scope are attached to it. The shared root scope cannot be disposed. `resetRootScope()` disposes its current child scopes, runs its registered cleanup callbacks, and clears its local slot values while keeping the shared root scope itself usable.
 
 ## Active Scope
 

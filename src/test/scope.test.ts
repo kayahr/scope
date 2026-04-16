@@ -16,7 +16,7 @@ import {
 } from "@kayahr/assert";
 import { dispose } from "../main/dispose.ts";
 import { ScopeError } from "../main/error.ts";
-import { Scope, createScope, getActiveScope, getRootScope, onDispose } from "../main/scope.ts";
+import { Scope, createScope, getActiveScope, getRootScope, onDispose, resetRootScope } from "../main/scope.ts";
 import { ScopeSlot } from "../main/slot.ts";
 
 describe("createScope", () => {
@@ -37,11 +37,9 @@ describe("createScope", () => {
         assertEquals(seen, [ "cleanup" ]);
     });
 
-    it("creates real Scope instances through the constructor and factory", () => {
-        const constructed = new Scope();
+    it("creates Scope instances through the factory", () => {
         const created = createScope();
 
-        assertInstanceOf(constructed, Scope);
         assertInstanceOf(created, Scope);
     });
 
@@ -56,10 +54,8 @@ describe("createScope", () => {
 
     it("uses the shared root scope when no scope is active", () => {
         const root = getRootScope();
-        const constructed = new Scope();
         const created = createScope();
 
-        assertSame(constructed.getParent(), root);
         assertSame(created.getParent(), root);
     });
 
@@ -77,9 +73,6 @@ describe("createScope", () => {
 
         assertThrowWithMessage(() => {
             createScope(parent);
-        }, ScopeError, "Cannot create a child scope under a disposed parent scope");
-        assertThrowWithMessage(() => {
-            void new Scope(parent);
         }, ScopeError, "Cannot create a child scope under a disposed parent scope");
     });
 
@@ -111,6 +104,69 @@ describe("createScope", () => {
             root.dispose();
         }, ScopeError, "Cannot dispose the shared root scope");
         assertFalse(root.isDisposed());
+    });
+
+    it("resets the shared root scope without disposing it", () => {
+        const root = getRootScope();
+        const slot = ScopeSlot.create<string>();
+        const seen: string[] = [];
+
+        resetRootScope();
+        root.set(slot, "root");
+        root.onDispose(() => {
+            seen.push("root");
+        });
+        createScope().onDispose(() => {
+            seen.push("child");
+        });
+
+        resetRootScope();
+
+        assertEquals(seen, [ "child", "root" ]);
+        assertFalse(root.isDisposed());
+        assertUndefined(root.get(slot));
+        assertFalse(root.has(slot));
+        assertNull(root.getParent());
+        assertNull(getActiveScope());
+
+        const child = createScope();
+        assertSame(child.getParent(), root);
+        child.dispose();
+    });
+
+    it("keeps the shared root scope usable after reset failures", () => {
+        const root = getRootScope();
+        const slot = ScopeSlot.create<string>();
+
+        resetRootScope();
+        root.onDispose(() => {
+            throw "root boom";
+        });
+        createScope().onDispose(() => {
+            throw "child boom";
+        });
+
+        let thrown: unknown = null;
+        try {
+            resetRootScope();
+        } catch (error) {
+            thrown = error;
+        }
+
+        assertInstanceOf(thrown, AggregateError);
+        assertSame(thrown.message, "Scope cleanup failed");
+        assertEquals(thrown.errors.map(error => error instanceof Error ? error.message : String(error)), [ "child boom", "root boom" ]);
+        assertFalse(root.isDisposed());
+        assertNull(root.getParent());
+        assertNull(getActiveScope());
+        assertUndefined(root.get(slot));
+        assertFalse(root.has(slot));
+        assertSame(root.set(slot, "root"), "root");
+
+        const child = createScope();
+        assertSame(child.getParent(), root);
+        child.dispose();
+        resetRootScope();
     });
 
     it("aggregates child-scope disposal failures together with parent disposal failures", () => {
