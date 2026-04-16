@@ -16,7 +16,7 @@ import {
 } from "@kayahr/assert";
 import { dispose } from "../main/dispose.ts";
 import { ScopeError } from "../main/error.ts";
-import { Scope, createScope, getActiveScope, onDispose } from "../main/scope.ts";
+import { Scope, createScope, getActiveScope, getRootScope, onDispose } from "../main/scope.ts";
 import { ScopeSlot } from "../main/slot.ts";
 
 describe("createScope", () => {
@@ -45,20 +45,30 @@ describe("createScope", () => {
         assertInstanceOf(created, Scope);
     });
 
+    it("returns one shared root scope which is not active by default", () => {
+        const rootA = getRootScope();
+        const rootB = getRootScope();
+
+        assertSame(rootA, rootB);
+        assertNull(rootA.getParent());
+        assertNull(getActiveScope());
+    });
+
+    it("uses the shared root scope when no scope is active", () => {
+        const root = getRootScope();
+        const constructed = new Scope();
+        const created = createScope();
+
+        assertSame(constructed.getParent(), root);
+        assertSame(created.getParent(), root);
+    });
+
     it("creates explicit child scopes under a given parent", () => {
         const parent = createScope();
         const child = createScope(parent);
 
         assertSame(child.getParent(), parent);
         assertFalse(child.isDisposed());
-    });
-
-    it("creates detached root scopes when null is passed explicitly", () => {
-        const constructed = new Scope(null);
-        const created = createScope(null);
-
-        assertNull(constructed.getParent());
-        assertNull(created.getParent());
     });
 
     it("throws when creating a child scope under a disposed parent", () => {
@@ -83,6 +93,24 @@ describe("createScope", () => {
         parent.dispose();
 
         assertEquals(seen, [ "child" ]);
+    });
+
+    it("creates explicit child scopes under the shared root scope", () => {
+        const root = getRootScope();
+        const child = createScope(root);
+
+        assertSame(child.getParent(), root);
+
+        child.dispose();
+    });
+
+    it("throws when disposing the shared root scope", () => {
+        const root = getRootScope();
+
+        assertThrowWithMessage(() => {
+            root.dispose();
+        }, ScopeError, "Cannot dispose the shared root scope");
+        assertFalse(root.isDisposed());
     });
 
     it("aggregates child-scope disposal failures together with parent disposal failures", () => {

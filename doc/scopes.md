@@ -4,7 +4,7 @@ Scopes are ownership boundaries for cleanup callbacks, child scopes, and scope-l
 
 ## Creating Scopes
 
-`createScope()` creates a scope. Without an explicit parent, it uses the current active scope as parent. Pass `null` to create an explicit root scope.
+`createScope()` creates a scope. Without an explicit parent, it uses the current active scope as parent, or the shared root scope when no scope is active.
 
 ```ts
 import { createScope, onDispose } from "@kayahr/scope";
@@ -26,6 +26,8 @@ scope.dispose();
 ```
 
 `createScope(scope => ...)` is shorthand for creating a scope and immediately running a callback inside it. `createScope(parent, scope => ...)` does the same with an explicit parent.
+
+`getRootScope()` returns the shared root scope. It is not active by default, but scopes created without an active scope are attached to it. The shared root scope cannot be disposed.
 
 ## Active Scope
 

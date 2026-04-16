@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: MIT
  */
 
-import { Scope, createScope, getActiveScope, onDispose } from "../main/scope.ts";
+import { Scope, createScope, getActiveScope, getRootScope, onDispose } from "../main/scope.ts";
 import { ScopeSlot } from "../main/slot.ts";
 
 const scope: Scope = createScope();
 const constructedScope: Scope = new Scope();
 const runResult: number = scope.run(() => 1);
 const maybeActiveScope: Scope | null = getActiveScope();
+const rootScope: Scope = getRootScope();
 const numberSlot: ScopeSlot<number> = ScopeSlot.create<number>();
 const localNumber: number = scope.set(numberSlot, 1);
 const maybeLocalNumber: number | undefined = scope.get(numberSlot);
@@ -19,6 +20,7 @@ const maybeFoundNumber: number | undefined = scope.find(numberSlot);
 onDispose(() => undefined);
 void runResult;
 void maybeActiveScope;
+void rootScope;
 void localNumber;
 void maybeLocalNumber;
 void hasLocalNumber;
@@ -44,8 +46,12 @@ const value: number = result;
 void value;
 
 createScope(scope).run(() => 1);
-createScope(null).run(() => 1);
 new Scope(scope).run(() => 1);
+
+// @ts-expect-error Detached scopes are not part of the public API.
+createScope(null).run(() => 1);
+
+// @ts-expect-error Detached scopes are not part of the public API.
 new Scope(null).run(() => 1);
 
 createScope(localScope => {

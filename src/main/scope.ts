@@ -9,13 +9,16 @@ import type { ScopeSlot } from "./slot.ts";
 /** Currently active scope, or null when no scope is active. */
 let activeScope: Scope | null = null;
 
+/** Whether the shared root scope is currently being initialized. */
+let initializingRootScope = false;
+
 /**
  * Public scope for lifetime, disposal, and scope-local values.
  *
  * A scope owns disposal callbacks registered while {@link run} executes synchronously and stores local values through scope slots.
  */
 export class Scope implements Disposable {
-    /** Parent scope currently owning this scope, or null for root or detached scopes. */
+    /** Parent scope currently owning this scope, or null when there is none. */
     #parent: Scope | null;
 
     /** Child scopes owned directly by this scope. */
@@ -30,19 +33,25 @@ export class Scope implements Disposable {
     /** Whether this scope already ran its disposal sequence. */
     #disposed = false;
 
+    /** Creates a new scope owned by the current active scope or shared root scope. */
+    public constructor();
+
     /**
-     * Creates a new scope optionally owned by an explicit parent.
+     * Creates a new scope owned by an explicit parent scope.
      *
-     * @param parent - The explicit parent scope, null for an explicit root scope, or the current active scope when omitted.
+     * @param parent - The explicit parent scope.
      * @throws {@link ScopeError} - When `parent` was already disposed.
      */
-    public constructor(parent: Scope | null = activeScope) {
-        if (parent?.isDisposed()) {
+    public constructor(parent: Scope);
+
+    public constructor(parent?: Scope) {
+        const resolvedParent = initializingRootScope ? null : (parent ?? activeScope ?? rootScope);
+        if (resolvedParent?.isDisposed()) {
             throw new ScopeError("Cannot create a child scope under a disposed parent scope");
         }
-        this.#parent = parent;
-        if (parent != null) {
-            parent.#children.add(this);
+        this.#parent = resolvedParent;
+        if (resolvedParent != null) {
+            resolvedParent.#children.add(this);
         }
     }
 
@@ -71,6 +80,9 @@ export class Scope implements Disposable {
 
     /** Disposes this scope and all resources currently owned by it. */
     public dispose(): void {
+        if (this === rootScope) {
+            throw new ScopeError("Cannot dispose the shared root scope");
+        }
         if (this.#disposed) {
             return;
         }
@@ -218,6 +230,16 @@ export class Scope implements Disposable {
     }
 }
 
+/** Shared root scope for scopes created without an active scope and for explicit long-lived ownership. */
+const rootScope = (() => {
+    initializingRootScope = true;
+    try {
+        return new Scope();
+    } finally {
+        initializingRootScope = false;
+    }
+})();
+
 /**
  * Returns the currently active scope.
  *
@@ -228,9 +250,21 @@ export function getActiveScope(): Scope | null {
 }
 
 /**
+ * Returns the shared root scope.
+ *
+ * The shared root scope is not active by default. Scopes created without an active scope are attached to it.
+ *
+ * @returns The shared root scope.
+ */
+export function getRootScope(): Scope {
+    return rootScope;
+}
+
+/**
  * Creates a scope.
  *
- * Without an explicit parent, the created scope is owned by the current active scope. When no scope is active, it becomes a root scope.
+ * Without an explicit parent, the created scope is owned by the current active scope, or by the shared root scope when no scope is
+ * active.
  *
  * The returned scope can be activated later through {@link Scope.run} and disposed through {@link Scope.dispose} or {@link dispose}.
  *
@@ -241,16 +275,16 @@ export function createScope(): Scope;
 /**
  * Creates a scope with the given explicit parent scope.
  *
- * @param parent - The explicit parent scope, or null for an explicit root scope.
+ * @param parent - The explicit parent scope.
  * @returns The created scope.
  */
-export function createScope(parent: Scope | null): Scope;
+export function createScope(parent: Scope): Scope;
 
 /**
  * Creates a scope and returns the value produced by the callback.
  *
  * This is shorthand for creating a scope and immediately running the callback inside it. Without an explicit parent, the created scope is
- * owned by the current active scope. When no scope is active, it becomes a root scope.
+ * owned by the current active scope, or by the shared root scope when no scope is active.
  *
  * Only the synchronous execution of the callback belongs to this scope. Work created after an `await` no longer belongs to this scope.
  * If the callback returns a promise, that promise is returned as-is and is not awaited.
@@ -272,16 +306,16 @@ export function createScope<T>(func: (scope: Scope) => T): T;
 /**
  * Creates a scope under the given explicit parent scope and returns the callback result.
  *
- * @param parent - The explicit parent scope, or null for an explicit root scope.
+ * @param parent - The explicit parent scope.
  * @param func   - Uses the scope and receives the scope handle.
  * @returns The value returned by the callback.
  */
-export function createScope<T>(parent: Scope | null, func: (scope: Scope) => T): T;
+export function createScope<T>(parent: Scope, func: (scope: Scope) => T): T;
 
-export function createScope<T>(parentOrFunc?: Scope | null | ((scope: Scope) => T), func?: (scope: Scope) => T): Scope | T {
-    const parent = typeof parentOrFunc === "function" ? undefined : parentOrFunc;
+export function createScope<T>(parentOrFunc?: Scope | ((scope: Scope) => T), func?: (scope: Scope) => T): Scope | T {
+    const parent = typeof parentOrFunc === "function" || parentOrFunc == null ? undefined : parentOrFunc;
     const callback = typeof parentOrFunc === "function" ? parentOrFunc : func;
-    const scope = new Scope(parent);
+    const scope = parent == null ? new Scope() : new Scope(parent);
     if (callback == null) {
         return scope;
     }

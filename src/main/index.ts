@@ -18,5 +18,5 @@
 
 export { dispose } from "./dispose.ts";
 export { ScopeError } from "./error.ts";
-export { Scope, createScope, getActiveScope, onDispose } from "./scope.ts";
+export { Scope, createScope, getActiveScope, getRootScope, onDispose } from "./scope.ts";
 export { ScopeSlot } from "./slot.ts";

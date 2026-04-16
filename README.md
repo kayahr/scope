@@ -43,7 +43,9 @@ scope.run(() => {
 scope.dispose();
 ```
 
-`createScope()` creates a scope. Without an explicit parent, it uses the current active scope as parent. Pass `null` to create an explicit root scope. `createScope(scope => ...)` is shorthand for creating a scope and running a callback inside it. Only the synchronous execution of `scope.run(...)` or `createScope(scope => ...)` belongs to the scope. Work created after an `await` is outside that scope. If the callback returns a promise, that promise is returned as-is and is not awaited.
+`createScope()` creates a scope. Without an explicit parent, it uses the current active scope as parent, or the shared root scope when no scope is active. `createScope(scope => ...)` is shorthand for creating a scope and running a callback inside it. Only the synchronous execution of `scope.run(...)` or `createScope(scope => ...)` belongs to the scope. Work created after an `await` is outside that scope. If the callback returns a promise, that promise is returned as-is and is not awaited.
+
+`getRootScope()` returns the shared root scope. It is not active by default, but scopes created without an active scope are attached to it.
 
 ## Documentation
 

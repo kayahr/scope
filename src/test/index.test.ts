@@ -8,7 +8,7 @@ import { assertEquals } from "@kayahr/assert";
 import * as exports from "../main/index.ts";
 import { dispose } from "../main/dispose.ts";
 import { ScopeError } from "../main/error.ts";
-import { Scope, createScope, getActiveScope, onDispose } from "../main/scope.ts";
+import { Scope, createScope, getActiveScope, getRootScope, onDispose } from "../main/scope.ts";
 import { ScopeSlot } from "../main/slot.ts";
 
 describe("index", () => {
@@ -17,6 +17,7 @@ describe("index", () => {
             createScope,
             dispose,
             getActiveScope,
+            getRootScope,
             onDispose,
             Scope,
             ScopeSlot,
@@ -24,6 +25,7 @@ describe("index", () => {
         });
 
         ((): Scope => ((new exports.Scope())))();
+        ((): Scope => (exports.getRootScope()))();
         ((): ScopeSlot<number> => (exports.ScopeSlot.create<number>()))();
     });
 });
