@@ -319,7 +319,7 @@ describe("createScope", () => {
 
         assertThrowWithMessage(() => {
             scope.run(() => 1);
-        }, ScopeError, "Cannot run in a disposed scope");
+        }, ScopeError, "Scope is disposed");
     });
 
     it("restores the previous active scope after running", () => {
@@ -423,23 +423,22 @@ describe("createScope", () => {
         assertSame(grandchild.find(slot), "child");
     });
 
-    it("keeps parent slot values readable during child cleanup triggered by parent disposal", () => {
+    it("throws when reading slot values during child cleanup triggered by parent disposal", () => {
         const slot = ScopeSlot.create<string>();
         const parent = createScope();
         const child = createScope(parent);
-        const seen: Array<string | undefined> = [];
 
         parent.set(slot, "parent");
         child.onDispose(() => {
-            seen.push(child.find(slot));
+            child.find(slot);
         });
 
-        parent.dispose();
-
-        assertEquals(seen, [ "parent" ]);
+        assertThrowWithMessage(() => {
+            parent.dispose();
+        }, ScopeError, "Scope is disposed");
     });
 
-    it("detaches a disposed child scope from its parent chain", () => {
+    it("throws when reading the parent chain after disposal", () => {
         const slot = ScopeSlot.create<string>();
         const parent = createScope();
         const child = createScope(parent);
@@ -447,19 +446,30 @@ describe("createScope", () => {
         parent.set(slot, "parent");
         child.dispose();
 
-        assertNull(child.getParent());
-        assertUndefined(child.find(slot));
+        assertThrowWithMessage(() => {
+            child.getParent();
+        }, ScopeError, "Scope is disposed");
+        assertThrowWithMessage(() => {
+            child.find(slot);
+        }, ScopeError, "Scope is disposed");
     });
 
-    it("clears local slot values after disposal", () => {
+    it("throws when reading slot values after disposal", () => {
         const slot = ScopeSlot.create<number>();
         const scope = createScope();
 
         scope.set(slot, 1);
         scope.dispose();
 
-        assertUndefined(scope.get(slot));
-        assertFalse(scope.has(slot));
+        assertThrowWithMessage(() => {
+            scope.get(slot);
+        }, ScopeError, "Scope is disposed");
+        assertThrowWithMessage(() => {
+            scope.has(slot);
+        }, ScopeError, "Scope is disposed");
+        assertThrowWithMessage(() => {
+            scope.find(slot);
+        }, ScopeError, "Scope is disposed");
     });
 
     it("throws when writing slot values after disposal", () => {
@@ -471,7 +481,7 @@ describe("createScope", () => {
 
         assertThrowWithMessage(() => {
             scope.set(slot, 1);
-        }, ScopeError, "Cannot write to a disposed scope");
+        }, ScopeError, "Scope is disposed");
     });
 
     it("deletes local slot values without touching parents", () => {
@@ -496,7 +506,7 @@ describe("createScope", () => {
 
         assertThrowWithMessage(() => {
             scope.delete(slot);
-        }, ScopeError, "Cannot delete from a disposed scope");
+        }, ScopeError, "Scope is disposed");
     });
 
     it("supports disposal through Symbol.dispose", () => {

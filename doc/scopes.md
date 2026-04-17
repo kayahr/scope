@@ -60,5 +60,6 @@ Disposing a parent also disposes all of its current child scopes. Creating a chi
 - `onDispose(...)` registers cleanup on the current active scope, if there is one.
 - Late `scope.onDispose(...)` registration after disposal runs immediately.
 - Repeated disposal is ignored.
+- Disposed scopes are no longer usable and throw a `ScopeError` when used.
 - If multiple cleanups fail, disposal throws an `AggregateError`.
 - If a `createScope(scope => ...)` callback throws and cleanup also fails, the callback error is listed first in the aggregate failure.

@@ -33,10 +33,8 @@ Slots are compared by identity, not by name.
 - `scope.delete(slot)` removes only the local value from that scope.
 - `scope.find(slot)` walks up the parent chain and returns the nearest stored value.
 
-`scope.get(...)` and `scope.find(...)` return `undefined` when no value exists.
+`scope.get(...)` and `scope.find(...)` return `undefined` when no value exists on a live scope.
 
 ## Disposal
 
-After disposal has completed, local slot values are cleared. `scope.get(...)` and `scope.find(...)` return `undefined`, and `scope.has(...)` returns `false`.
-
-Writing to a disposed scope throws a `ScopeError`. That includes `set(...)` and `delete(...)`.
+Disposed scopes are no longer usable. Accessing or modifying slot values on them throws a `ScopeError`.

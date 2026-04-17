@@ -50,8 +50,10 @@ export abstract class Scope implements Disposable {
      * Returns the current parent scope, or null when this scope currently has no parent.
      *
      * @returns The current parent scope, or null when there is none.
+     * @throws {@link ScopeError} - When the scope was already disposed.
      */
     public getParent(): Scope | null {
+        this.#assertNotDisposed();
         return this.#parent;
     }
 
@@ -91,7 +93,7 @@ export abstract class Scope implements Disposable {
      * @throws {@link ScopeError} - When the scope was already disposed.
      */
     public set<T>(slot: ScopeSlot<T>, value: T): T {
-        this.#assertMutable("Cannot write to a disposed scope");
+        this.#assertNotDisposed();
         this.#slots.set(slot as ScopeSlot<unknown>, value);
         return value;
     }
@@ -101,8 +103,10 @@ export abstract class Scope implements Disposable {
      *
      * @param slot - The slot to read.
      * @returns The locally stored value, or undefined when no local value exists.
+     * @throws {@link ScopeError} - When the scope was already disposed.
      */
     public get<T>(slot: ScopeSlot<T>): T | undefined {
+        this.#assertNotDisposed();
         return this.#slots.has(slot as ScopeSlot<unknown>)
             ? this.#slots.get(slot as ScopeSlot<unknown>) as T
             : undefined;
@@ -113,8 +117,10 @@ export abstract class Scope implements Disposable {
      *
      * @param slot - The slot to test.
      * @returns True when this scope has a local value for the slot.
+     * @throws {@link ScopeError} - When the scope was already disposed.
      */
     public has(slot: ScopeSlot<unknown>): boolean {
+        this.#assertNotDisposed();
         return this.#slots.has(slot);
     }
 
@@ -126,7 +132,7 @@ export abstract class Scope implements Disposable {
      * @throws {@link ScopeError} - When the scope was already disposed.
      */
     public delete(slot: ScopeSlot<unknown>): boolean {
-        this.#assertMutable("Cannot delete from a disposed scope");
+        this.#assertNotDisposed();
         return this.#slots.delete(slot);
     }
 
@@ -135,8 +141,10 @@ export abstract class Scope implements Disposable {
      *
      * @param slot - The slot to resolve.
      * @returns The nearest stored value, or undefined when no value exists in this scope chain.
+     * @throws {@link ScopeError} - When the scope was already disposed.
      */
     public find<T>(slot: ScopeSlot<T>): T | undefined {
+        this.#assertNotDisposed();
         let current: Scope | null = this;
         while (current != null) {
             if (current.#slots.has(slot as ScopeSlot<unknown>)) {
@@ -171,9 +179,7 @@ export abstract class Scope implements Disposable {
      * @throws {@link ScopeError} - When the scope was already disposed.
      */
     public run<T>(func: () => T): T {
-        if (this.#disposed) {
-            throw new ScopeError("Cannot run in a disposed scope");
-        }
+        this.#assertNotDisposed();
         const previousScope = activeScope;
         activeScope = this;
         try {
@@ -219,11 +225,10 @@ export abstract class Scope implements Disposable {
     /**
      * Throws when this scope was already disposed.
      *
-     * @param message - The error message.
      */
-    #assertMutable(message: string): void {
+    #assertNotDisposed(): void {
         if (this.#disposed) {
-            throw new ScopeError(message);
+            throw new ScopeError("Scope is disposed");
         }
     }
 }
