@@ -6,17 +6,10 @@
 /**
  * Public API entry point for this library.
  *
- * This package uses `Disposable` and `Symbol.dispose`.
- *
- * TypeScript consumers currently need a compatible `lib` configuration including `esnext.disposable`.
- *
- * Runtimes without native `Symbol.dispose` need a polyfill before importing this package, for example from the `core-js` package via
- * `core-js/proposals/explicit-resource-management`.
- *
- * @module scope
+ * @module
  */
 
-export { dispose } from "./dispose.ts";
+export { dispose, disposeAsync } from "./dispose.ts";
 export { ScopeError } from "./error.ts";
-export { Scope, createScope, getActiveScope, getRootScope, onDispose, resetRootScope } from "./scope.ts";
+export { Scope, createScope, getActiveScope, getRootScope, onAsyncDispose, onDispose, resetRootScope, resetRootScopeAsync } from "./scope.ts";
 export { ScopeSlot } from "./slot.ts";

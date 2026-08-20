@@ -6,9 +6,18 @@
 import { describe, it } from "node:test";
 import { assertEquals } from "@kayahr/assert";
 import * as exports from "../main/index.ts";
-import { dispose } from "../main/dispose.ts";
+import { dispose, disposeAsync } from "../main/dispose.ts";
 import { ScopeError } from "../main/error.ts";
-import { Scope, createScope, getActiveScope, getRootScope, onDispose, resetRootScope } from "../main/scope.ts";
+import {
+    Scope,
+    createScope,
+    getActiveScope,
+    getRootScope,
+    onAsyncDispose,
+    onDispose,
+    resetRootScope,
+    resetRootScopeAsync
+} from "../main/scope.ts";
 import { ScopeSlot } from "../main/slot.ts";
 
 describe("index", () => {
@@ -16,18 +25,16 @@ describe("index", () => {
         assertEquals({ ...exports }, {
             createScope,
             dispose,
+            disposeAsync,
             getActiveScope,
             getRootScope,
+            onAsyncDispose,
             onDispose,
             resetRootScope,
+            resetRootScopeAsync,
             Scope,
             ScopeSlot,
             ScopeError
         });
-
-        ((): Scope => (exports.createScope()))();
-        ((): Scope => (exports.getRootScope()))();
-        (() => exports.resetRootScope())();
-        ((): ScopeSlot<number> => (exports.ScopeSlot.create<number>()))();
     });
 });

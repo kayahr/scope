@@ -6,6 +6,9 @@
 import { ScopeError, throwErrors } from "./error.ts";
 import type { ScopeSlot } from "./slot.ts";
 
+/** Synchronous or asynchronous cleanup callback owned by a scope. */
+type Cleanup = () => void | PromiseLike<void>;
+
 /** Currently active scope, or null when no scope is active. */
 let activeScope: Scope | null = null;
 
@@ -14,21 +17,24 @@ let activeScope: Scope | null = null;
  *
  * A scope owns disposal callbacks registered while {@link run} executes synchronously and stores local values through scope slots.
  */
-export abstract class Scope implements Disposable {
+export abstract class Scope implements AsyncDisposable, Disposable {
     /** Parent scope currently owning this scope, or null when there is none. */
     #parent: Scope | null;
 
     /** Child scopes owned directly by this scope. */
     readonly #children = new Set<Scope>();
 
-    /** Disposal callbacks owned directly by this scope. */
-    readonly #cleanups = new Set<() => void>();
+    /** Disposal callbacks owned directly by this scope, mapped to whether they require asynchronous disposal. */
+    readonly #cleanups = new Map<Cleanup, boolean>();
 
     /** Scope-local values stored directly on this scope. */
     readonly #slots = new Map<ScopeSlot<unknown>, unknown>();
 
-    /** Whether this scope already ran its disposal sequence. */
+    /** Whether disposal of this scope has started. */
     #disposed = false;
+
+    /** Asynchronous disposal operation, or null when asynchronous disposal has not started. */
+    #disposePromise: Promise<void> | null = null;
 
     /**
      * Creates a new scope optionally owned by an explicit parent scope.
@@ -58,9 +64,9 @@ export abstract class Scope implements Disposable {
     }
 
     /**
-     * Returns whether this scope already ran its disposal sequence.
+     * Returns whether disposal of this scope has started.
      *
-     * @returns True when this scope was already disposed.
+     * @returns True when this scope is being disposed or was already disposed.
      */
     public isDisposed(): boolean {
         return this.#disposed;
@@ -71,15 +77,58 @@ export abstract class Scope implements Disposable {
         this.dispose();
     }
 
-    /** Disposes this scope and all resources currently owned by it. */
+    /** Asynchronously disposes this scope and all resources currently owned by it. */
+    public [Symbol.asyncDispose](): Promise<void> {
+        return this.disposeAsync();
+    }
+
+    /**
+     * Disposes this scope and all resources currently owned by it.
+     *
+     * @throws {@link ScopeError} - When the scope owns asynchronous cleanup and must be disposed through {@link disposeAsync}.
+     */
     public dispose(): void {
         if (this.#disposed) {
             return;
+        }
+        if (this.requiresAsyncDisposal()) {
+            throw new ScopeError("Scope requires asynchronous disposal");
         }
         this.#disposed = true;
         try {
             this.clear();
         } finally {
+            this.#parent = null;
+        }
+    }
+
+    /**
+     * Asynchronously disposes this scope and all resources currently owned by it.
+     *
+     * Synchronous and asynchronous cleanup callbacks are run sequentially in registration order. Concurrent calls share the same disposal operation.
+     *
+     * @returns Promise which resolves when disposal has completed.
+     */
+    public disposeAsync(): Promise<void> {
+        if (this.#disposePromise != null) {
+            return this.#disposePromise;
+        }
+        if (this.#disposed) {
+            return Promise.resolve();
+        }
+        this.#disposed = true;
+        return this.#disposePromise = this.#runAsyncDisposal();
+    }
+
+    /** Runs asynchronous disposal and detaches this scope from its parent afterwards. */
+    async #runAsyncDisposal(): Promise<void> {
+        try {
+            await this.clearAsync();
+        } finally {
+            const parent = this.#parent;
+            if (parent != null) {
+                parent.#children.delete(this);
+            }
             this.#parent = null;
         }
     }
@@ -164,8 +213,25 @@ export abstract class Scope implements Disposable {
         if (this.#disposed) {
             cleanup();
         } else {
-            this.#cleanups.add(cleanup);
+            this.#cleanups.set(cleanup, false);
         }
+    }
+
+    /**
+     * Registers an asynchronous cleanup callback to run when this scope is disposed asynchronously.
+     *
+     * A scope owning asynchronous cleanup must be disposed through {@link disposeAsync}. When the scope is already disposed, the cleanup runs immediately
+     * and the returned promise represents its completion.
+     *
+     * @param cleanup - The asynchronous cleanup callback to register.
+     * @returns Promise which resolves immediately after registration, or after immediate cleanup of an already disposed scope.
+     */
+    public onAsyncDispose(cleanup: () => PromiseLike<void>): Promise<void> {
+        if (this.#disposed) {
+            return Promise.resolve(cleanup());
+        }
+        this.#cleanups.set(cleanup, true);
+        return Promise.resolve();
     }
 
     /**
@@ -199,7 +265,7 @@ export abstract class Scope implements Disposable {
         }
         const currentChildren = [ ...this.#children ];
         this.#children.clear();
-        const currentCleanups = [ ...this.#cleanups ];
+        const currentCleanups = [ ...this.#cleanups.keys() ];
         this.#cleanups.clear();
         const errors: unknown[] = [];
         for (const child of currentChildren) {
@@ -223,6 +289,46 @@ export abstract class Scope implements Disposable {
     }
 
     /**
+     * Asynchronously clears the currently owned child scopes, cleanup callbacks, and slot values.
+     */
+    protected async clearAsync(): Promise<void> {
+        const currentChildren = [ ...this.#children ];
+        this.#children.clear();
+        const currentCleanups = [ ...this.#cleanups.keys() ];
+        this.#cleanups.clear();
+        const errors: unknown[] = [];
+        for (const child of currentChildren) {
+            try {
+                await child.disposeAsync();
+            } catch (error) {
+                errors.push(error);
+            }
+        }
+        for (const cleanup of currentCleanups) {
+            try {
+                await cleanup();
+            } catch (error) {
+                errors.push(error);
+            }
+        }
+        this.#slots.clear();
+        if (errors.length > 0) {
+            throwErrors(errors, "Scope cleanup failed");
+        }
+    }
+
+    /**
+     * Returns whether this scope or any owned child scope requires asynchronous disposal.
+     *
+     * @returns True when asynchronous disposal is required.
+     */
+    protected requiresAsyncDisposal(): boolean {
+        return this.#disposePromise != null
+            || [ ...this.#cleanups.values() ].some(Boolean)
+            || [ ...this.#children ].some(child => child.requiresAsyncDisposal());
+    }
+
+    /**
      * Throws when this scope was already disposed.
      *
      */
@@ -242,6 +348,9 @@ class ChildScope extends Scope {
 
 /** Shared root scope implementation. */
 class RootScope extends Scope {
+    /** Currently running asynchronous reset, or null when no reset is running. */
+    #resetPromise: Promise<void> | null = null;
+
     public constructor() {
         super(null);
     }
@@ -251,9 +360,34 @@ class RootScope extends Scope {
         throw new ScopeError("Cannot dispose the shared root scope");
     }
 
+    /** The shared root scope itself cannot be disposed. */
+    public override disposeAsync(): Promise<void> {
+        return Promise.reject(new ScopeError("Cannot dispose the shared root scope"));
+    }
+
     /** Resets the shared root scope without replacing it. */
     public reset(): void {
+        if (this.#resetPromise != null || this.requiresAsyncDisposal()) {
+            throw new ScopeError("Scope requires asynchronous disposal");
+        }
         this.clear();
+    }
+
+    /** Asynchronously resets the shared root scope without replacing it. */
+    public resetAsync(): Promise<void> {
+        if (this.#resetPromise == null) {
+            this.#resetPromise = this.#runAsyncReset();
+        }
+        return this.#resetPromise;
+    }
+
+    /** Runs an asynchronous root-scope reset and releases the cached operation afterwards. */
+    async #runAsyncReset(): Promise<void> {
+        try {
+            await this.clearAsync();
+        } finally {
+            this.#resetPromise = null;
+        }
     }
 }
 
@@ -286,9 +420,23 @@ export function getRootScope(): Scope {
  *
  * This disposes the root scope's current child scopes, runs its registered cleanup callbacks, and clears its local slot values, but
  * keeps the shared root scope itself usable afterwards.
+ *
+ * @throws {@link ScopeError} - When the root scope owns asynchronous cleanup and must be reset through {@link resetRootScopeAsync}.
  */
 export function resetRootScope(): void {
     rootScope.reset();
+}
+
+/**
+ * Asynchronously resets the shared root scope without replacing it.
+ *
+ * This disposes the root scope's current child scopes, awaits its registered cleanup callbacks, and clears its local slot values, but keeps the shared
+ * root scope itself usable afterwards.
+ *
+ * @returns Promise which resolves when the root scope has been reset.
+ */
+export function resetRootScopeAsync(): Promise<void> {
+    return rootScope.resetAsync();
 }
 
 /**
@@ -297,7 +445,7 @@ export function resetRootScope(): void {
  * Without an explicit parent, the created scope is owned by the current active scope, or by the shared root scope when no scope is
  * active.
  *
- * The returned scope can be activated later through {@link Scope.run} and disposed through {@link Scope.dispose} or {@link dispose}.
+ * The returned scope can be activated later through {@link Scope.run} and disposed synchronously or asynchronously.
  *
  * @returns The created scope.
  */
@@ -320,10 +468,10 @@ export function createScope(parent: Scope): Scope;
  * Only the synchronous execution of the callback belongs to this scope. Work created after an `await` no longer belongs to this scope.
  * If the callback returns a promise, that promise is returned as-is and is not awaited.
  *
- * Cleanup callbacks registered while the callback runs belong to this scope and run together when `scope.dispose` is called. Scope-local
+ * Cleanup callbacks registered while the callback runs belong to this scope and run together when the scope is disposed. Scope-local
  * values written during that time also belong to this scope. Nested scopes are owned the same way.
  *
- * `scope.onDispose` registers additional cleanup callbacks on this scope. Only the synchronous part of the callback belongs to the
+ * `scope.onDispose` and `scope.onAsyncDispose` register additional cleanup callbacks on this scope. Only the synchronous part of the callback belongs to the
  * scope, so work created after an `await` would no longer belong to it.
  *
  * If the callback throws, the created scope is disposed immediately. If scope disposal also fails, the callback error is listed first in
@@ -369,4 +517,14 @@ export function createScope<T>(parentOrFunc?: Scope | ((scope: Scope) => T), fun
  */
 export function onDispose(cleanup: () => void): void {
     activeScope?.onDispose(cleanup);
+}
+
+/**
+ * Registers an asynchronous cleanup callback on the currently active scope, if there is one.
+ *
+ * @param cleanup - The asynchronous cleanup callback to register.
+ * @returns Promise which resolves immediately after registration, or after immediate cleanup when the active scope is already disposed.
+ */
+export function onAsyncDispose(cleanup: () => PromiseLike<void>): Promise<void> {
+    return activeScope?.onAsyncDispose(cleanup) ?? Promise.resolve();
 }

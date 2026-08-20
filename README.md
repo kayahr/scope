@@ -14,7 +14,7 @@ npm install @kayahr/scope
 
 TypeScript consumers currently need a compatible `lib` configuration including `esnext.disposable`.
 
-Runtimes without native `Symbol.dispose` need a polyfill before importing `@kayahr/scope`, for example from [core-js](https://www.npmjs.com/package/core-js):
+Both `Symbol.dispose` and `Symbol.asyncDispose` must be available at runtime. Otherwise, load a polyfill before importing `@kayahr/scope`, for example from [core-js](https://www.npmjs.com/package/core-js):
 
 ```ts
 import "core-js/proposals/explicit-resource-management";

@@ -14,9 +14,18 @@ import {
     assertTrue,
     assertUndefined
 } from "@kayahr/assert";
-import { dispose } from "../main/dispose.ts";
+import { dispose, disposeAsync } from "../main/dispose.ts";
 import { ScopeError } from "../main/error.ts";
-import { Scope, createScope, getActiveScope, getRootScope, onDispose, resetRootScope } from "../main/scope.ts";
+import {
+    Scope,
+    createScope,
+    getActiveScope,
+    getRootScope,
+    onAsyncDispose,
+    onDispose,
+    resetRootScope,
+    resetRootScopeAsync
+} from "../main/scope.ts";
 import { ScopeSlot } from "../main/slot.ts";
 
 describe("createScope", () => {
@@ -106,6 +115,13 @@ describe("createScope", () => {
         assertFalse(root.isDisposed());
     });
 
+    it("throws when asynchronously disposing the shared root scope", async () => {
+        const root = getRootScope();
+
+        await assertThrowWithMessage(() => root.disposeAsync(), ScopeError, "Cannot dispose the shared root scope");
+        assertFalse(root.isDisposed());
+    });
+
     it("resets the shared root scope without disposing it", () => {
         const root = getRootScope();
         const slot = ScopeSlot.create<string>();
@@ -169,6 +185,56 @@ describe("createScope", () => {
         resetRootScope();
     });
 
+    it("asynchronously resets the shared root scope", async () => {
+        const root = getRootScope();
+        const slot = ScopeSlot.create<string>();
+        const seen: string[] = [];
+
+        await resetRootScopeAsync();
+        root.set(slot, "root");
+        void root.onAsyncDispose(async () => {
+            await Promise.resolve();
+            seen.push("root");
+        });
+        const child = createScope();
+        void child.onAsyncDispose(async () => {
+            await Promise.resolve();
+            seen.push("child");
+        });
+
+        assertThrowWithMessage(() => resetRootScope(), ScopeError, "Scope requires asynchronous disposal");
+        assertSame(root.get(slot), "root");
+        assertFalse(child.isDisposed());
+
+        await resetRootScopeAsync();
+
+        assertEquals(seen, [ "child", "root" ]);
+        assertFalse(root.isDisposed());
+        assertUndefined(root.get(slot));
+        assertTrue(child.isDisposed());
+    });
+
+    it("shares concurrent asynchronous root-scope resets", async () => {
+        const root = getRootScope();
+        let finish!: () => void;
+        const cleanupFinished = new Promise<void>(resolve => {
+            finish = resolve;
+        });
+
+        await resetRootScopeAsync();
+        void root.onAsyncDispose(() => cleanupFinished);
+
+        const first = resetRootScopeAsync();
+        const second = resetRootScopeAsync();
+
+        assertSame(first, second);
+        await Promise.resolve();
+        assertThrowWithMessage(() => resetRootScope(), ScopeError, "Scope requires asynchronous disposal");
+        finish();
+        await first;
+        resetRootScope();
+    });
+
     it("aggregates child-scope disposal failures together with parent disposal failures", () => {
         const parent = createScope();
         const child = createScope(parent);
@@ -207,12 +273,177 @@ describe("createScope", () => {
         assertEquals(seen, [ "first", "second" ]);
     });
 
+    it("runs synchronous and asynchronous cleanups sequentially in registration order", async () => {
+        const seen: string[] = [];
+        const scope = createScope();
+        scope.onDispose(() => {
+            seen.push("sync first");
+        });
+        void scope.onAsyncDispose(async () => {
+            await Promise.resolve();
+            seen.push("async");
+        });
+        scope.onDispose(() => {
+            seen.push("sync second");
+        });
+
+        await scope.disposeAsync();
+
+        assertEquals(seen, [ "sync first", "async", "sync second" ]);
+    });
+
+    it("asynchronously disposes child scopes before their parent", async () => {
+        const seen: string[] = [];
+        const parent = createScope();
+        const child = createScope(parent);
+        void child.onAsyncDispose(async () => {
+            seen.push("child start");
+            await Promise.resolve();
+            seen.push("child end");
+        });
+        void parent.onAsyncDispose(async () => {
+            seen.push("parent");
+        });
+
+        await parent.disposeAsync();
+
+        assertEquals(seen, [ "child start", "child end", "parent" ]);
+    });
+
+    it("awaits child-scope disposal which is already in progress", async () => {
+        const seen: string[] = [];
+        let finish!: () => void;
+        const cleanupFinished = new Promise<void>(resolve => {
+            finish = resolve;
+        });
+        const parent = createScope();
+        const child = createScope(parent);
+        void child.onAsyncDispose(async () => {
+            seen.push("child start");
+            await cleanupFinished;
+            seen.push("child end");
+        });
+        parent.onDispose(() => {
+            seen.push("parent");
+        });
+
+        const childDisposal = child.disposeAsync();
+        await Promise.resolve();
+        assertThrowWithMessage(() => parent.dispose(), ScopeError, "Scope requires asynchronous disposal");
+        const parentDisposal = parent.disposeAsync();
+        await Promise.resolve();
+
+        assertEquals(seen, [ "child start" ]);
+        finish();
+        await parentDisposal;
+        await childDisposal;
+        assertEquals(seen, [ "child start", "child end", "parent" ]);
+    });
+
+    it("rejects synchronous disposal when a child scope requires asynchronous disposal", async () => {
+        const seen: string[] = [];
+        const parent = createScope();
+        const child = createScope(parent);
+        void child.onAsyncDispose(async () => {
+            seen.push("disposed");
+        });
+
+        assertThrowWithMessage(() => parent.dispose(), ScopeError, "Scope requires asynchronous disposal");
+        assertFalse(parent.isDisposed());
+        assertFalse(child.isDisposed());
+
+        await parent.disposeAsync();
+
+        assertEquals(seen, [ "disposed" ]);
+        assertTrue(parent.isDisposed());
+        assertTrue(child.isDisposed());
+    });
+
+    it("shares concurrent asynchronous disposal and runs it only once", async () => {
+        const seen: string[] = [];
+        let finish!: () => void;
+        const cleanupFinished = new Promise<void>(resolve => {
+            finish = resolve;
+        });
+        const scope = createScope();
+        void scope.onAsyncDispose(async () => {
+            seen.push("cleanup");
+            await cleanupFinished;
+        });
+
+        const first = scope.disposeAsync();
+        const second = scope.disposeAsync();
+
+        assertSame(first, second);
+        assertTrue(scope.isDisposed());
+        finish();
+        await first;
+        assertSame(scope.disposeAsync(), first);
+        assertEquals(seen, [ "cleanup" ]);
+    });
+
+    it("aggregates synchronous and asynchronous cleanup failures", async () => {
+        const scope = createScope();
+        void scope.onAsyncDispose(async () => {
+            throw "async boom";
+        });
+        scope.onDispose(() => {
+            throw "sync boom";
+        });
+
+        let thrown: unknown = null;
+        try {
+            await scope.disposeAsync();
+        } catch (error) {
+            thrown = error;
+        }
+
+        assertInstanceOf(thrown, AggregateError);
+        assertSame(thrown.message, "Scope cleanup failed");
+        assertEquals(thrown.errors.map(error => error instanceof Error ? error.message : String(error)), [ "async boom", "sync boom" ]);
+    });
+
+    it("aggregates asynchronous child-scope and parent cleanup failures", async () => {
+        const parent = createScope();
+        const child = createScope(parent);
+        void child.onAsyncDispose(async () => {
+            throw "child boom";
+        });
+        void parent.onAsyncDispose(async () => {
+            throw "parent boom";
+        });
+
+        let thrown: unknown = null;
+        try {
+            await parent.disposeAsync();
+        } catch (error) {
+            thrown = error;
+        }
+
+        assertInstanceOf(thrown, AggregateError);
+        assertSame(thrown.message, "Scope cleanup failed");
+        assertEquals(thrown.errors.map(error => error instanceof Error ? error.message : String(error)), [ "child boom", "parent boom" ]);
+    });
+
     it("runs late onDispose registrations immediately after disposal", () => {
         const seen: string[] = [];
         const scope = createScope();
 
         scope.dispose();
         scope.onDispose(() => {
+            seen.push("late");
+        });
+
+        assertEquals(seen, [ "late" ]);
+    });
+
+    it("awaits late asynchronous cleanup registrations immediately after disposal", async () => {
+        const seen: string[] = [];
+        const scope = createScope();
+
+        scope.dispose();
+        await scope.onAsyncDispose(async () => {
+            await Promise.resolve();
             seen.push("late");
         });
 
@@ -354,6 +585,29 @@ describe("createScope", () => {
         assertEquals(seen, [ "disposed" ]);
     });
 
+    it("disposes generic asynchronous and synchronous disposables asynchronously", async () => {
+        const seen: string[] = [];
+        const asyncHandle: AsyncDisposable & Disposable = {
+            async [Symbol.asyncDispose](): Promise<void> {
+                await Promise.resolve();
+                seen.push("async");
+            },
+            [Symbol.dispose](): void {
+                seen.push("wrong sync");
+            }
+        };
+        const syncHandle: Disposable = {
+            [Symbol.dispose](): void {
+                seen.push("sync fallback");
+            }
+        };
+
+        await disposeAsync(asyncHandle);
+        await disposeAsync(syncHandle);
+
+        assertEquals(seen, [ "async", "sync fallback" ]);
+    });
+
     it("ignores repeated disposal", () => {
         const seen: string[] = [];
         const scope = createScope();
@@ -363,6 +617,19 @@ describe("createScope", () => {
 
         scope.dispose();
         scope.dispose();
+
+        assertEquals(seen, [ "disposed" ]);
+    });
+
+    it("ignores asynchronous disposal after synchronous disposal", async () => {
+        const seen: string[] = [];
+        const scope = createScope();
+        scope.onDispose(() => {
+            seen.push("disposed");
+        });
+
+        scope.dispose();
+        await scope.disposeAsync();
 
         assertEquals(seen, [ "disposed" ]);
     });
@@ -381,6 +648,25 @@ describe("createScope", () => {
         });
 
         scope.dispose();
+
+        assertEquals(seen, [ "owned" ]);
+    });
+
+    it("registers ambient asynchronous cleanups only while a scope is active", async () => {
+        const seen: string[] = [];
+        const scope = createScope();
+
+        void onAsyncDispose(async () => {
+            seen.push("ignored");
+        });
+        scope.run(() => {
+            void onAsyncDispose(async () => {
+                await Promise.resolve();
+                seen.push("owned");
+            });
+        });
+
+        await scope.disposeAsync();
 
         assertEquals(seen, [ "owned" ]);
     });
@@ -518,6 +804,19 @@ describe("createScope", () => {
         });
 
         scope[Symbol.dispose]();
+
+        assertEquals(seen, [ "disposed" ]);
+        assertTrue(scope.isDisposed());
+    });
+
+    it("supports disposal through Symbol.asyncDispose", async () => {
+        const seen: string[] = [];
+        const scope = createScope();
+        void scope.onAsyncDispose(async () => {
+            seen.push("disposed");
+        });
+
+        await scope[Symbol.asyncDispose]();
 
         assertEquals(seen, [ "disposed" ]);
         assertTrue(scope.isDisposed());
