@@ -85,6 +85,8 @@ export abstract class Scope implements AsyncDisposable, Disposable {
     /**
      * Disposes this scope and all resources currently owned by it.
      *
+     * Child scopes are disposed in reverse creation order before cleanup callbacks run in reverse registration order.
+     *
      * @throws {@link ScopeError} - When the scope owns asynchronous cleanup and must be disposed through {@link disposeAsync}.
      */
     public dispose(): void {
@@ -105,7 +107,8 @@ export abstract class Scope implements AsyncDisposable, Disposable {
     /**
      * Asynchronously disposes this scope and all resources currently owned by it.
      *
-     * Synchronous and asynchronous cleanup callbacks are run sequentially in registration order. Concurrent calls share the same disposal operation.
+     * Child scopes are disposed sequentially in reverse creation order before synchronous and asynchronous cleanup callbacks run sequentially in reverse
+     * registration order. Concurrent calls share the same disposal operation.
      *
      * @returns Promise which resolves when disposal has completed.
      */
@@ -263,9 +266,9 @@ export abstract class Scope implements AsyncDisposable, Disposable {
         if (parent != null) {
             parent.#children.delete(this);
         }
-        const currentChildren = [ ...this.#children ];
+        const currentChildren = [ ...this.#children ].reverse();
         this.#children.clear();
-        const currentCleanups = [ ...this.#cleanups.keys() ];
+        const currentCleanups = [ ...this.#cleanups.keys() ].reverse();
         this.#cleanups.clear();
         const errors: unknown[] = [];
         for (const child of currentChildren) {
@@ -292,9 +295,9 @@ export abstract class Scope implements AsyncDisposable, Disposable {
      * Asynchronously clears the currently owned child scopes, cleanup callbacks, and slot values.
      */
     protected async clearAsync(): Promise<void> {
-        const currentChildren = [ ...this.#children ];
+        const currentChildren = [ ...this.#children ].reverse();
         this.#children.clear();
-        const currentCleanups = [ ...this.#cleanups.keys() ];
+        const currentCleanups = [ ...this.#cleanups.keys() ].reverse();
         this.#cleanups.clear();
         const errors: unknown[] = [];
         for (const child of currentChildren) {

@@ -85,16 +85,22 @@ describe("createScope", () => {
         }, ScopeError, "Cannot create a child scope under a disposed parent scope");
     });
 
-    it("disposes explicit child scopes together with their parent", () => {
+    it("disposes child scopes in reverse creation order before their parent", () => {
         const seen: string[] = [];
         const parent = createScope();
         createScope(parent).onDispose(() => {
-            seen.push("child");
+            seen.push("first child");
+        });
+        createScope(parent).onDispose(() => {
+            seen.push("second child");
+        });
+        parent.onDispose(() => {
+            seen.push("parent");
         });
 
         parent.dispose();
 
-        assertEquals(seen, [ "child" ]);
+        assertEquals(seen, [ "second child", "first child", "parent" ]);
     });
 
     it("creates explicit child scopes under the shared root scope", () => {
@@ -257,7 +263,7 @@ describe("createScope", () => {
         assertEquals(thrown.errors.map(error => error instanceof Error ? error.message : String(error)), [ "child boom", "parent boom" ]);
     });
 
-    it("runs onDispose callbacks when the scope is disposed", () => {
+    it("runs onDispose callbacks in reverse registration order", () => {
         const seen: string[] = [];
         const scope = createScope(scope => {
             scope.onDispose(() => {
@@ -270,10 +276,10 @@ describe("createScope", () => {
         });
 
         scope.dispose();
-        assertEquals(seen, [ "first", "second" ]);
+        assertEquals(seen, [ "second", "first" ]);
     });
 
-    it("runs synchronous and asynchronous cleanups sequentially in registration order", async () => {
+    it("runs synchronous and asynchronous cleanups sequentially in reverse registration order", async () => {
         const seen: string[] = [];
         const scope = createScope();
         scope.onDispose(() => {
@@ -289,17 +295,23 @@ describe("createScope", () => {
 
         await scope.disposeAsync();
 
-        assertEquals(seen, [ "sync first", "async", "sync second" ]);
+        assertEquals(seen, [ "sync second", "async", "sync first" ]);
     });
 
-    it("asynchronously disposes child scopes before their parent", async () => {
+    it("asynchronously disposes child scopes in reverse creation order before their parent", async () => {
         const seen: string[] = [];
         const parent = createScope();
-        const child = createScope(parent);
-        void child.onAsyncDispose(async () => {
-            seen.push("child start");
+        const firstChild = createScope(parent);
+        void firstChild.onAsyncDispose(async () => {
+            seen.push("first child start");
             await Promise.resolve();
-            seen.push("child end");
+            seen.push("first child end");
+        });
+        const secondChild = createScope(parent);
+        void secondChild.onAsyncDispose(async () => {
+            seen.push("second child start");
+            await Promise.resolve();
+            seen.push("second child end");
         });
         void parent.onAsyncDispose(async () => {
             seen.push("parent");
@@ -307,7 +319,7 @@ describe("createScope", () => {
 
         await parent.disposeAsync();
 
-        assertEquals(seen, [ "child start", "child end", "parent" ]);
+        assertEquals(seen, [ "second child start", "second child end", "first child start", "first child end", "parent" ]);
     });
 
     it("awaits child-scope disposal which is already in progress", async () => {
@@ -400,7 +412,7 @@ describe("createScope", () => {
 
         assertInstanceOf(thrown, AggregateError);
         assertSame(thrown.message, "Scope cleanup failed");
-        assertEquals(thrown.errors.map(error => error instanceof Error ? error.message : String(error)), [ "async boom", "sync boom" ]);
+        assertEquals(thrown.errors.map(error => error instanceof Error ? error.message : String(error)), [ "sync boom", "async boom" ]);
     });
 
     it("aggregates asynchronous child-scope and parent cleanup failures", async () => {
@@ -468,7 +480,7 @@ describe("createScope", () => {
 
         assertInstanceOf(thrown, AggregateError);
         assertSame(thrown.message, "Scope cleanup failed");
-        assertEquals(thrown.errors.map(error => error instanceof Error ? error.message : String(error)), [ "first boom", "second boom" ]);
+        assertEquals(thrown.errors.map(error => error instanceof Error ? error.message : String(error)), [ "second boom", "first boom" ]);
     });
 
     it("throws a single cleanup failure directly", () => {
@@ -526,7 +538,7 @@ describe("createScope", () => {
 
         assertInstanceOf(thrown, AggregateError);
         assertSame(thrown.message, "Scope callback failed");
-        assertEquals(thrown.errors.map(error => error instanceof Error ? error.message : String(error)), [ "callback boom", "cleanup boom 1", "cleanup boom 2" ]);
+        assertEquals(thrown.errors.map(error => error instanceof Error ? error.message : String(error)), [ "callback boom", "cleanup boom 2", "cleanup boom 1" ]);
     });
 
     it("rethrows the callback failure directly when scope cleanup succeeds", () => {

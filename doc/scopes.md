@@ -52,7 +52,7 @@ child.onDispose(() => {
 parent.dispose();
 ```
 
-Disposing a parent also disposes all of its current child scopes before running the parent's own cleanup callbacks. Creating a child scope under an already disposed parent throws a `ScopeError`.
+Disposing a parent also disposes all of its current child scopes in reverse creation order before running the parent's own cleanup callbacks. Creating a child scope under an already disposed parent throws a `ScopeError`.
 
 ## Synchronous Cleanup
 
@@ -60,7 +60,7 @@ Disposing a parent also disposes all of its current child scopes before running 
 
 Calling `scope.onDispose(...)` after the scope has already been disposed runs the cleanup immediately.
 
-Call `scope.dispose()` to synchronously dispose all child scopes, run all synchronous cleanup callbacks in registration order, and clear all scope-local values. If the scope or one of its descendants owns asynchronous cleanup, `dispose()` throws a `ScopeError` without disposing the scope. Use `disposeAsync()` in that case.
+Call `scope.dispose()` to synchronously dispose all child scopes in reverse creation order, run all synchronous cleanup callbacks in reverse registration order, and clear all scope-local values. If the scope or one of its descendants owns asynchronous cleanup, `dispose()` throws a `ScopeError` without disposing the scope. Use `disposeAsync()` in that case.
 
 Use `resetRootScope()` to synchronously dispose the shared root scope's current child scopes, run its cleanup callbacks, and clear its local values without disposing the root scope itself. Like `dispose()`, it throws a `ScopeError` when asynchronous cleanup is required.
 
@@ -84,7 +84,7 @@ scope.run(() => {
 await scope.disposeAsync();
 ```
 
-Asynchronous disposal supports both synchronous and asynchronous cleanup. Child scopes are disposed first, then the scope's own cleanup callbacks are awaited sequentially in registration order. Concurrent calls to `disposeAsync()` share the same disposal operation.
+Asynchronous disposal supports both synchronous and asynchronous cleanup. Child scopes are disposed sequentially in reverse creation order, then the scope's own cleanup callbacks are awaited sequentially in reverse registration order. Concurrent calls to `disposeAsync()` share the same disposal operation.
 
 Calling `scope.onAsyncDispose(...)` after the scope has already been disposed runs the cleanup immediately. The returned promise represents completion of this late cleanup.
 
