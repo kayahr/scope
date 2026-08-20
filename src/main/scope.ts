@@ -143,7 +143,7 @@ export abstract class Scope implements AsyncDisposable, Disposable {
      */
     public set<T>(slot: ScopeSlot<T>, value: T): T {
         this.#assertNotDisposed();
-        this.#slots.set(slot as ScopeSlot<unknown>, value);
+        this.#slots.set(slot, value);
         return value;
     }
 
@@ -156,8 +156,8 @@ export abstract class Scope implements AsyncDisposable, Disposable {
      */
     public get<T>(slot: ScopeSlot<T>): T | undefined {
         this.#assertNotDisposed();
-        return this.#slots.has(slot as ScopeSlot<unknown>)
-            ? this.#slots.get(slot as ScopeSlot<unknown>) as T
+        return this.#slots.has(slot)
+            ? this.#slots.get(slot) as T
             : undefined;
     }
 
@@ -196,8 +196,8 @@ export abstract class Scope implements AsyncDisposable, Disposable {
         this.#assertNotDisposed();
         let current: Scope | null = this;
         while (current != null) {
-            if (current.#slots.has(slot as ScopeSlot<unknown>)) {
-                return current.#slots.get(slot as ScopeSlot<unknown>) as T;
+            if (current.#slots.has(slot)) {
+                return current.#slots.get(slot) as T;
             }
             current = current.#parent;
         }
